@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ad Mute</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <h2>Simple Ad Muter</h2>
+  <div class="toggle-container">
+    <label class="switch">
+      <input type="checkbox" id="enableAdMuter">
+      <span class="slider"></span>
+    </label>
+    <span>Enable Ad Muting</span>
+  </div>
+  <div class="metrics">
+    <p>Ads Muted: <span id="adsMuted">0</span></p>
+    <p>Time Saved: <span id="timeSaved">0</span></p>
+  </div>
+  <button id="supportButton">Support this extension</button>
+  <script src="popup.js"></script>
+</body>
+</html>
