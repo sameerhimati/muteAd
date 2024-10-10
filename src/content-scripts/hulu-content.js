@@ -105,24 +105,21 @@ function checkNetworkRequests() {
 }
 
 function handleAdStart() {
-    console.log('Hulu ad detected, attempting to mute tab');
-    if (chrome.runtime && chrome.runtime.sendMessage) {
-      chrome.runtime.sendMessage({ action: 'muteTab' }, (response) => {
-        if (chrome.runtime.lastError) {
-          console.error('Error sending mute message:', chrome.runtime.lastError);
-          handleExtensionError(chrome.runtime.lastError);
-        } else if (response && response.success) {
-          console.log('Tab muted successfully');
-          isMuted = true;
-        } else {
-          console.error('Failed to mute tab:', response ? response.error : 'Unknown error');
-        }
-      });
-    } else {
-      console.error('Chrome runtime not available');
-      handleExtensionError(new Error('Chrome runtime not available'));
-    }
-  }
+  console.log('Ad detected, attempting to mute tab');
+  chrome.runtime.sendMessage({ action: 'muteTab' })
+    .then(response => {
+      if (response && response.success) {
+        console.log('Tab muted successfully');
+        isMuted = true;
+      } else {
+        throw new Error('Failed to mute tab: ' + (response ? response.error : 'Unknown error'));
+      }
+    })
+    .catch(error => {
+      console.error('Error sending mute message:', error);
+      handleExtensionError(error);
+    });
+}
   
   function handleAdEnd() {
     console.log('Ad ended, attempting to unmute tab');
@@ -161,15 +158,15 @@ function handleAdStart() {
   
     setTimeout(() => {
       if (chrome.runtime && chrome.runtime.sendMessage) {
-        chrome.runtime.sendMessage({ action: 'ping' }, (response) => {
-          if (chrome.runtime.lastError) {
-            console.log('Reconnection failed, retrying...');
-            reconnectToExtension();
-          } else {
+        chrome.runtime.sendMessage({ action: 'ping' })
+          .then(response => {
             console.log('Reconnected to extension successfully');
             initAdDetection();
-          }
-        });
+          })
+          .catch(error => {
+            console.log('Reconnection failed, retrying...');
+            reconnectToExtension();
+          });
       } else {
         console.log('Chrome runtime still not available, retrying...');
         reconnectToExtension();
@@ -178,31 +175,34 @@ function handleAdStart() {
   }
   
   // Initialize on load
-  function initialize() {
-    if (chrome.runtime && chrome.runtime.sendMessage) {
-      chrome.runtime.sendMessage({ action: 'getAdMuterState' }, (response) => {
-        if (chrome.runtime.lastError) {
-          console.error('Failed to get initial state:', chrome.runtime.lastError);
-          reconnectToExtension();
-        } else {
-          isAdMuterEnabled = response.enabled;
-          if (isAdMuterEnabled) {
-            initAdDetection();
-          }
-        }
-      });
-    } else {
-      console.error('Chrome runtime not available on initialization');
+function initialize() {
+  if (!chrome.runtime) {
+    console.error('Chrome runtime not available');
+    return;
+  }
+
+  chrome.runtime.sendMessage({ action: 'getAdMuterState' })
+    .then(response => {
+      if (!response) {
+        throw new Error('No response received from background script');
+      }
+      isAdMuterEnabled = response.enabled;
+      if (isAdMuterEnabled) {
+        initAdDetection();
+      }
+    })
+    .catch(error => {
+      console.error('Failed to get initial state:', error.message);
       reconnectToExtension();
-    }
-  }
-  
-  // Use a more robust initialization approach
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initialize);
-  } else {
-    initialize();
-  }
+    });
+}
+
+// Use this initialization approach in both scripts
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initialize);
+} else {
+  initialize();
+}
   
   // Listen for runtime messages
   if (chrome.runtime && chrome.runtime.onMessage) {

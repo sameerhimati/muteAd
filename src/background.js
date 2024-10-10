@@ -25,38 +25,49 @@ chrome.runtime.onInstalled.addListener(() => {
         });
       });
       return true; // Indicates we will send a response asynchronously
-    } else if (message.action === 'updateMetrics') {
+    } else if (request.action === 'updateMetrics') {  // Changed from 'message' to 'request'
       chrome.storage.sync.get(['timeMuted', 'adsMuted'], (result) => {
-          const newTimeMuted = (result.timeMuted || 0) + (message.adDuration || 0);
-          const newAdsMuted = (result.adsMuted || 0) + 1;
-          chrome.storage.sync.set({ timeMuted: newTimeMuted, adsMuted: newAdsMuted }, () => {
-              console.log('Metrics updated:', { timeMuted: newTimeMuted, adsMuted: newAdsMuted });
-              sendResponse({ success: true });
-          });
-      });
-      return true;
-  } else if (request.action === 'ping') {
-      sendResponse({ success: true });
-  } else if (message.action === 'setAdMuterState') {
-    chrome.storage.sync.set({ adMuterEnabled: message.enabled }, () => {
-      chrome.tabs.query({}, (tabs) => {
-        tabs.forEach((tab) => {
-          chrome.tabs.sendMessage(tab.id, { action: 'updateAdMuterState', enabled: message.enabled })
-            .catch(() => {}); // Ignore errors for tabs that can't receive messages
-          
-          if (!message.enabled) {
-            // Unmute the tab if we're disabling the extension
-            chrome.tabs.update(tab.id, { muted: false }, () => {
-              if (chrome.runtime.lastError) {
-                console.error('Error unmuting tab:', chrome.runtime.lastError);
-              }
-            });
-          }
+        const newTimeMuted = (result.timeMuted || 0) + (request.adDuration || 0);
+        const newAdsMuted = (result.adsMuted || 0) + 1;
+        chrome.storage.sync.set({ timeMuted: newTimeMuted, adsMuted: newAdsMuted }, () => {
+          console.log('Metrics updated:', { timeMuted: newTimeMuted, adsMuted: newAdsMuted });
+          sendResponse({ success: true });
         });
       });
+      return true;
+    } else if (request.action === 'setAdMuterState') {
+      chrome.storage.sync.set({ adMuterEnabled: request.enabled }, () => {
+        chrome.tabs.query({}, (tabs) => {
+          tabs.forEach((tab) => {
+            chrome.tabs.sendMessage(tab.id, { action: 'updateAdMuterState', enabled: request.enabled })
+              .catch(() => {}); // Ignore errors for tabs that can't receive messages
+          });
+        });
+        sendResponse({ success: true });
+      });
+      return true;
+    } else if (request.action === 'ping') {
       sendResponse({ success: true });
-    });
-    return true;
+  // } else if (message.action === 'setAdMuterState') {
+  //   chrome.storage.sync.set({ adMuterEnabled: message.enabled }, () => {
+  //     chrome.tabs.query({}, (tabs) => {
+  //       tabs.forEach((tab) => {
+  //         chrome.tabs.sendMessage(tab.id, { action: 'updateAdMuterState', enabled: message.enabled })
+  //           .catch(() => {}); // Ignore errors for tabs that can't receive messages
+          
+  //         if (!message.enabled) {
+  //           // Unmute the tab if we're disabling the extension
+  //           chrome.tabs.update(tab.id, { muted: false }, () => {
+  //             if (chrome.runtime.lastError) {
+  //               console.error('Error unmuting tab:', chrome.runtime.lastError);
+  //             }
+  //           });
+  //         }
+  //       });
+  //     });
+  //     sendResponse({ success: true });
+  //   });
+  //   return true;
   } else if (request.action === 'getAdMuterState') {
       chrome.storage.sync.get('adMuterEnabled', (data) => {
         sendResponse({ enabled: data.adMuterEnabled });

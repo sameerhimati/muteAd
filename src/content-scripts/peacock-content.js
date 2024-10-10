@@ -55,19 +55,21 @@ function checkForPeacockAds() {
 }
 
 function handleAdStart() {
-  console.log('Peacock ad detected, attempting to mute tab');
-  chrome.runtime.sendMessage({ action: 'muteTab' }, (response) => {
-    if (chrome.runtime.lastError) {
-      console.error('Error sending mute message:', chrome.runtime.lastError);
-      handleExtensionError(chrome.runtime.lastError);
-    } else if (response && response.success) {
-      console.log('Tab muted successfully');
-      isMuted = true;
-    } else {
-      console.error('Failed to mute tab:', response ? response.error : 'Unknown error');
-    }
-  });
-}
+    console.log('Ad detected, attempting to mute tab');
+    chrome.runtime.sendMessage({ action: 'muteTab' })
+      .then(response => {
+        if (response && response.success) {
+          console.log('Tab muted successfully');
+          isMuted = true;
+        } else {
+          throw new Error('Failed to mute tab: ' + (response ? response.error : 'Unknown error'));
+        }
+      })
+      .catch(error => {
+        console.error('Error sending mute message:', error);
+        handleExtensionError(error);
+      });
+  }
 
 function handleAdEnd() {
     console.log('Ad ended, attempting to unmute tab');
@@ -96,39 +98,61 @@ function handleExtensionError(error) {
 }
 
 function reconnectToExtension() {
-  if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-    console.error('Max reconnection attempts reached. Please refresh the page.');
-    return;
-  }
-
-  reconnectAttempts++;
-  console.log(`Attempting to reconnect to extension (Attempt ${reconnectAttempts})`);
-
-  setTimeout(() => {
-    chrome.runtime.sendMessage({ action: 'ping' }, (response) => {
-      if (chrome.runtime.lastError) {
-        console.log('Reconnection failed, retrying...');
-        reconnectToExtension();
-      } else {
-        console.log('Reconnected to extension successfully');
-        initAdDetection();
-      }
-    });
-  }, 1000 * reconnectAttempts); // Increase delay with each attempt
-}
-
-// Initialize on load
-chrome.runtime.sendMessage({ action: 'getAdMuterState' }, (response) => {
-  if (chrome.runtime.lastError) {
-    console.error('Failed to get initial state:', chrome.runtime.lastError);
-    reconnectToExtension();
-  } else {
-    isAdMuterEnabled = response.enabled;
-    if (isAdMuterEnabled) {
-      initAdDetection();
+    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      console.error('Max reconnection attempts reached. Please refresh the page.');
+      return;
     }
+  
+    reconnectAttempts++;
+    console.log(`Attempting to reconnect to extension (Attempt ${reconnectAttempts})`);
+  
+    setTimeout(() => {
+      if (chrome.runtime && chrome.runtime.sendMessage) {
+        chrome.runtime.sendMessage({ action: 'ping' })
+          .then(response => {
+            console.log('Reconnected to extension successfully');
+            initAdDetection();
+          })
+          .catch(error => {
+            console.log('Reconnection failed, retrying...');
+            reconnectToExtension();
+          });
+      } else {
+        console.log('Chrome runtime still not available, retrying...');
+        reconnectToExtension();
+      }
+    }, RECONNECT_INTERVAL);
   }
-});
+
+// Common initialization function for both Hulu and Peacock
+function initialize() {
+    if (!chrome.runtime) {
+      console.error('Chrome runtime not available');
+      return;
+    }
+  
+    chrome.runtime.sendMessage({ action: 'getAdMuterState' })
+      .then(response => {
+        if (!response) {
+          throw new Error('No response received from background script');
+        }
+        isAdMuterEnabled = response.enabled;
+        if (isAdMuterEnabled) {
+          initAdDetection();
+        }
+      })
+      .catch(error => {
+        console.error('Failed to get initial state:', error.message);
+        reconnectToExtension();
+      });
+  }
+  
+  // Use this initialization approach in both scripts
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initialize);
+  } else {
+    initialize();
+  }
 
 // Listen for messages from the background script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
