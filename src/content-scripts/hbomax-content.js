@@ -1,20 +1,17 @@
 let adObserver = null;
-let isEnabled = true;
+let isAdMuterEnabled = false;
 let isMuted = false;
 let isAdPlaying = false;
 let adStartTime = 0;
 let consecutiveAdChecks = 0;
 const AD_CHECK_THRESHOLD = 3;
-
-chrome.storage.sync.get(['adMuterEnabled'], (result) => {
-    isEnabled = result.adMuterEnabled !== undefined ? result.adMuterEnabled : true;
-    if (isEnabled) {
-        initAdDetection();
-    }
-});
+const AD_CHECK_INTERVAL = 500;
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 5;
+const RECONNECT_INTERVAL = 2000; // 2 seconds
 
 function checkForHBOMaxAds() {
-    if (!isEnabled) return;
+    if (!isAdMuterEnabled) return;
 
     try {
         const adDetected = checkVisualAdMarkers() || 
@@ -37,8 +34,9 @@ function checkForHBOMaxAds() {
         }
 
         console.log('HBO Max ad check:', { adDetected, consecutiveAdChecks, isAdPlaying });
+        reconnectAttempts = 0; // Reset reconnect attempts on successful check
     } catch (error) {
-        console.log('Error checking for HBO Max ads:', error);
+        console.error('Error checking for HBO Max ads:', error);
         handleExtensionError(error);
     }
 }
@@ -55,18 +53,14 @@ function checkVisualAdMarkers() {
 function checkPlayerStateChanges() {
     const player = document.querySelector('video');
     if (player) {
-        const currentTime = player.currentTime;
-        const duration = player.duration;
-        // Check for unexpected changes in video duration or current time
-        // This might indicate an ad insertion
-        // Implementation depends on specific HBO Max player behavior
+        // Implement HBO Max-specific player state checks
+        // This is a placeholder and should be adjusted based on HBO Max's player behavior
     }
     return false;
 }
 
 function checkAudioLevels() {
-    // Implement HBO Max-specific audio level checks
-    // This might involve analyzing the audio context if available
+    // Implement HBO Max-specific audio level checks if possible
     return false;
 }
 
@@ -78,52 +72,66 @@ function handleAdStart() {
                 console.log('Tab muted successfully');
                 isMuted = true;
             } else {
-                console.log('Failed to mute tab:', response ? response.error : 'Unknown error');
+                throw new Error('Failed to mute tab: ' + (response ? response.error : 'Unknown error'));
             }
         })
         .catch(error => {
-            console.log('Error sending mute message:', error);
+            console.error('Error sending mute message:', error);
             handleExtensionError(error);
         });
 }
 
 function handleAdEnd() {
     console.log('HBO Max ad ended, attempting to unmute tab');
-    chrome.runtime.sendMessage({ action: 'unmuteTab' })
+    const adDuration = Math.round((Date.now() - adStartTime) / 1000);
+    chrome.runtime.sendMessage({ action: 'unmuteTab', adDuration: adDuration })
         .then(response => {
             if (response && response.success) {
                 console.log('Tab unmuted successfully');
                 isMuted = false;
-                updateMetrics();
             } else {
-                console.log('Failed to unmute tab:', response ? response.error : 'Unknown error');
+                console.error('Failed to unmute tab:', response ? response.error : 'Unknown error');
+                throw new Error('Failed to unmute tab');
             }
         })
         .catch(error => {
-            console.log('Error sending unmute message:', error);
+            console.error('Error sending unmute message:', error);
             handleExtensionError(error);
         });
 }
 
-function updateMetrics() {
-    const muteDuration = Math.round((Date.now() - adStartTime) / 1000);
-    chrome.runtime.sendMessage({
-        action: 'updateMetrics',
-        muteDuration: muteDuration
-    });
+function handleExtensionError(error) {
+    console.error('Handling extension error:', error);
+    if (error.message.includes('Extension context invalidated') || error.message.includes('Chrome runtime not available')) {
+        reconnectToExtension();
+    }
 }
 
-function handleExtensionError(error) {
-    console.log('Handling extension error:', error);
-    if (error.message.includes('Extension context invalidated')) {
-        console.log('Extension context invalidated. Reloading ad detection.');
-        stopAdDetection();
-        setTimeout(() => {
-            initAdDetection();
-        }, 1000);
-    } else if (error.message.includes('Permission denied')) {
-        console.log('Permission denied error. This may affect some functionality.');
+function reconnectToExtension() {
+    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+        console.error('Max reconnection attempts reached. Please refresh the page.');
+        return;
     }
+
+    reconnectAttempts++;
+    console.log(`Attempting to reconnect to extension (Attempt ${reconnectAttempts})`);
+
+    setTimeout(() => {
+        if (chrome.runtime && chrome.runtime.sendMessage) {
+            chrome.runtime.sendMessage({ action: 'ping' })
+                .then(response => {
+                    console.log('Reconnected to extension successfully');
+                    initAdDetection();
+                })
+                .catch(error => {
+                    console.log('Reconnection failed, retrying...');
+                    reconnectToExtension();
+                });
+        } else {
+            console.log('Chrome runtime still not available, retrying...');
+            reconnectToExtension();
+        }
+    }, RECONNECT_INTERVAL);
 }
 
 function initAdDetection() {
@@ -137,20 +145,18 @@ function initAdDetection() {
 
     function observePlayer() {
         const playerContainer = document.querySelector('.video-player') || document.body;
-        adObserver.observe(playerContainer, config);
-        console.log('Observing HBO Max player container');
-        checkForHBOMaxAds(); // Initial check
-        console.log('HBO Max ad detection initialized');
+        if (playerContainer) {
+            console.log('Player container found, initializing ad detection');
+            adObserver.observe(playerContainer, config);
+            setInterval(checkForHBOMaxAds, AD_CHECK_INTERVAL);
+        } else {
+            console.log('Player container not found, will retry');
+            setTimeout(observePlayer, 1000); // Retry after 1 second
+        }
     }
 
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', observePlayer);
-    } else {
-        observePlayer();
-    }
-
-    // Set up periodic checks
-    setInterval(checkForHBOMaxAds, 1000);
+    observePlayer();
+    console.log('HBO Max ad detection initialized');
 }
 
 function stopAdDetection() {
@@ -161,20 +167,48 @@ function stopAdDetection() {
     console.log('HBO Max ad detection stopped');
 }
 
+function initialize() {
+    if (!chrome.runtime) {
+        console.error('Chrome runtime not available');
+        return;
+    }
+
+    chrome.runtime.sendMessage({ action: 'getAdMuterState' })
+        .then(response => {
+            if (!response) {
+                throw new Error('No response received from background script');
+            }
+            isAdMuterEnabled = response.enabled;
+            if (isAdMuterEnabled) {
+                initAdDetection();
+            }
+        })
+        .catch(error => {
+            console.error('Failed to get initial state:', error.message);
+            reconnectToExtension();
+        });
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initialize);
+} else {
+    initialize();
+}
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.action === 'toggleAdMuter') {
-        isEnabled = request.enabled;
-        console.log('Ad Muter toggled on HBO Max:', isEnabled);
-        if (isEnabled) {
+    if (request.action === 'updateAdMuterState') {
+        isAdMuterEnabled = request.enabled;
+        if (isAdMuterEnabled) {
             initAdDetection();
         } else {
             stopAdDetection();
+            if (isAdPlaying) {
+                handleAdEnd();
+            }
         }
         sendResponse({ success: true });
     }
     return true;
 });
-
-initAdDetection();
 
 console.log('HBO Max content script loaded');

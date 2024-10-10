@@ -1,73 +1,119 @@
 let adObserver = null;
-let isEnabled = true;
+let isAdMuterEnabled = false;
 let isMuted = false;
 let isAdPlaying = false;
 let adStartTime = 0;
 let consecutiveAdChecks = 0;
-const AD_CHECK_THRESHOLD = 3;
-
-chrome.storage.sync.get(['adMuterEnabled'], (result) => {
-    isEnabled = result.adMuterEnabled !== undefined ? result.adMuterEnabled : true;
-    if (isEnabled) {
-        initAdDetection();
-    }
-});
+const AD_CHECK_THRESHOLD = 2;
+const AD_CHECK_INTERVAL = 250; // milliseconds
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 5;
+const RECONNECT_INTERVAL = 2000; // milliseconds
 
 function checkForParamountAds() {
-    if (!isEnabled) return;
+    if (!isAdMuterEnabled) return;
 
     try {
-        const adDetected = checkVisualAdMarkers() || 
-                           checkPlayerStateChanges() || 
-                           checkAudioLevels();
+        const adIframeActive = checkAdIframeState();
+        const adClickElementVisible = checkAdClickElementVisibility();
+        const adContainerActive = checkAdContainerState();
+        const adCountdown = checkForAdCountdown();
+        const visualMarkers = checkVisualAdMarkers();
+
+        const adDetected = adIframeActive || adClickElementVisible || adContainerActive ||
+                           (adCountdown && visualMarkers);
+
+        console.log('Ad detection results:', {
+            adIframeActive, adClickElementVisible, adContainerActive, adCountdown, visualMarkers
+        });
 
         if (adDetected) {
             consecutiveAdChecks++;
+            console.log(`Ad detected, consecutive checks: ${consecutiveAdChecks}`);
             if (consecutiveAdChecks >= AD_CHECK_THRESHOLD && !isAdPlaying) {
                 isAdPlaying = true;
                 adStartTime = Date.now();
                 handleAdStart();
             }
         } else {
-            if (consecutiveAdChecks >= AD_CHECK_THRESHOLD && isAdPlaying) {
-                isAdPlaying = false;
+            if (isAdPlaying) {
                 handleAdEnd();
             }
             consecutiveAdChecks = 0;
+            isAdPlaying = false;
         }
 
         console.log('Paramount+ ad check:', { adDetected, consecutiveAdChecks, isAdPlaying });
+        reconnectAttempts = 0;
     } catch (error) {
-        console.log('Error checking for Paramount+ ads:', error);
+        console.error('Error checking for Paramount+ ads:', error);
         handleExtensionError(error);
     }
 }
 
-function checkVisualAdMarkers() {
-    const adMarkers = [
-        '.ad-container', '.ad-overlay', '.ad-banner',
-        '[data-testid="ad-overlay"]', '[data-testid="ad-banner"]',
-        '.video-player__overlay--ad-playing'
-    ];
-    return adMarkers.some(marker => document.querySelector(marker));
-}
-
-function checkPlayerStateChanges() {
-    const player = document.querySelector('video');
-    if (player) {
-        const currentTime = player.currentTime;
-        const duration = player.duration;
-        // Check for unexpected changes in video duration or current time
-        // This might indicate an ad insertion
-        // Implementation depends on specific Paramount+ player behavior
+function checkAdIframeState() {
+    const adIframe = document.querySelector('iframe[src*="imasdk.googleapis.com"]');
+    if (adIframe) {
+        const style = window.getComputedStyle(adIframe);
+        return style.display !== 'none' && style.visibility !== 'hidden';
     }
     return false;
 }
 
-function checkAudioLevels() {
-    // Implement Paramount+-specific audio level checks
-    // This might involve analyzing the audio context if available
+function checkAdClickElementVisibility() {
+    const adClickEl = document.querySelector('[data-role="adClickEl"]');
+    if (adClickEl) {
+        const style = window.getComputedStyle(adClickEl);
+        return style.display !== 'none' && style.visibility !== 'hidden';
+    }
     return false;
+}
+
+function checkAdContainerState() {
+    const adContainer = document.querySelector('[data-role="adContainer"]');
+    if (adContainer) {
+        const style = window.getComputedStyle(adContainer);
+        return style.display !== 'none' && adContainer.innerHTML.trim() !== '';
+    }
+    return false;
+}
+
+function checkForAdCountdown() {
+    const adCountdownElement = document.querySelector('.ad-info-manager-circular-loader-copy');
+    if (adCountdownElement && adCountdownElement.offsetParent !== null) {
+        const countdownValue = parseInt(adCountdownElement.textContent);
+        if (!isNaN(countdownValue) && countdownValue > 0) {
+            console.log('Ad countdown found:', countdownValue);
+            return true;
+        }
+    }
+    return false;
+}
+
+function checkVisualAdMarkers() {
+    const adMarkers = [
+        '.ad-container',
+        '.ad-overlay',
+        '.ad-banner',
+        '[data-testid="ad-overlay"]',
+        '[data-testid="ad-banner"]',
+        '.video-player__overlay--ad-playing',
+        '.ad-persistent-player',
+        '.ad-ui-view',
+        '[data-purpose="ad-banner"]',
+        '[data-purpose="ad-container"]',
+        '.ad-player-overlay',
+        '.ad-playback-progress',
+        '.video-ad-overlay'
+    ];
+    return adMarkers.some(marker => {
+        const element = document.querySelector(marker);
+        if (element) {
+            const style = window.getComputedStyle(element);
+            return style.display !== 'none' && style.visibility !== 'hidden' && element.innerHTML.trim() !== '';
+        }
+        return false;
+    });
 }
 
 function handleAdStart() {
@@ -78,52 +124,68 @@ function handleAdStart() {
                 console.log('Tab muted successfully');
                 isMuted = true;
             } else {
-                console.log('Failed to mute tab:', response ? response.error : 'Unknown error');
+                throw new Error('Failed to mute tab: ' + (response ? response.error : 'Unknown error'));
             }
         })
         .catch(error => {
-            console.log('Error sending mute message:', error);
+            console.error('Error sending mute message:', error);
             handleExtensionError(error);
         });
 }
 
 function handleAdEnd() {
+    if (!isMuted) return; // Prevent unnecessary unmuting
+
     console.log('Paramount+ ad ended, attempting to unmute tab');
-    chrome.runtime.sendMessage({ action: 'unmuteTab' })
+    const adDuration = Math.round((Date.now() - adStartTime) / 1000);
+    chrome.runtime.sendMessage({ action: 'unmuteTab', adDuration: adDuration })
         .then(response => {
             if (response && response.success) {
                 console.log('Tab unmuted successfully');
                 isMuted = false;
-                updateMetrics();
             } else {
-                console.log('Failed to unmute tab:', response ? response.error : 'Unknown error');
+                console.error('Failed to unmute tab:', response ? response.error : 'Unknown error');
+                throw new Error('Failed to unmute tab');
             }
         })
         .catch(error => {
-            console.log('Error sending unmute message:', error);
+            console.error('Error sending unmute message:', error);
             handleExtensionError(error);
         });
 }
 
-function updateMetrics() {
-    const muteDuration = Math.round((Date.now() - adStartTime) / 1000);
-    chrome.runtime.sendMessage({
-        action: 'updateMetrics',
-        muteDuration: muteDuration
-    });
+function handleExtensionError(error) {
+    console.error('Handling extension error:', error);
+    if (error.message.includes('Extension context invalidated') || error.message.includes('Chrome runtime not available')) {
+        reconnectToExtension();
+    }
 }
 
-function handleExtensionError(error) {
-    console.log('Handling extension error:', error);
-    if (error.message.includes('Extension context invalidated')) {
-        console.log('Extension context invalidated. Reloading ad detection.');
-        stopAdDetection();
-        setTimeout(() => {
-            initAdDetection();
-        }, 1000);
-    } else if (error.message.includes('Permission denied')) {
-        console.log('Permission denied error. This may affect some functionality.');
+function reconnectToExtension() {
+    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+        console.error('Max reconnection attempts reached. Please refresh the page.');
+        return;
     }
+
+    reconnectAttempts++;
+    console.log(`Attempting to reconnect to extension (Attempt ${reconnectAttempts})`);
+
+    setTimeout(() => {
+        if (chrome.runtime && chrome.runtime.sendMessage) {
+            chrome.runtime.sendMessage({ action: 'ping' })
+                .then(response => {
+                    console.log('Reconnected to extension successfully');
+                    initAdDetection();
+                })
+                .catch(error => {
+                    console.log('Reconnection failed, retrying...');
+                    reconnectToExtension();
+                });
+        } else {
+            console.log('Chrome runtime still not available, retrying...');
+            reconnectToExtension();
+        }
+    }, RECONNECT_INTERVAL);
 }
 
 function initAdDetection() {
@@ -137,45 +199,70 @@ function initAdDetection() {
 
     function observePlayer() {
         const playerContainer = document.querySelector('#video-player') || document.body;
-        adObserver.observe(playerContainer, config);
-        console.log('Observing Paramount+ player container');
-        checkForParamountAds(); // Initial check
-        console.log('Paramount+ ad detection initialized');
+        if (playerContainer) {
+            console.log('Player container found, initializing ad detection');
+            adObserver.observe(playerContainer, config);
+            setInterval(checkForParamountAds, AD_CHECK_INTERVAL);
+        } else {
+            console.log('Player container not found, will retry');
+            setTimeout(observePlayer, 1000); // Retry after 1 second
+        }
     }
 
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', observePlayer);
-    } else {
-        observePlayer();
-    }
-
-    // Set up periodic checks
-    setInterval(checkForParamountAds, 1000);
+    observePlayer();
+    console.log('Paramount+ ad detection initialized');
 }
 
 function stopAdDetection() {
     if (adObserver) {
-      adObserver.disconnect();
-      adObserver = null;
+        adObserver.disconnect();
+        adObserver = null;
     }
-    // Clear any intervals or timeouts you might have set
-    console.log('Ad detection stopped');
-  }
+    console.log('Paramount+ ad detection stopped');
+}
+
+function initialize() {
+    if (!chrome.runtime) {
+        console.error('Chrome runtime not available');
+        return;
+    }
+
+    chrome.runtime.sendMessage({ action: 'getAdMuterState' })
+        .then(response => {
+            if (!response) {
+                throw new Error('No response received from background script');
+            }
+            isAdMuterEnabled = response.enabled;
+            if (isAdMuterEnabled) {
+                initAdDetection();
+            }
+        })
+        .catch(error => {
+            console.error('Failed to get initial state:', error.message);
+            reconnectToExtension();
+        });
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initialize);
+} else {
+    initialize();
+}
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.action === 'toggleAdMuter') {
-        isEnabled = request.enabled;
-        console.log('Ad Muter toggled on Paramount+:', isEnabled);
-        if (isEnabled) {
+    if (request.action === 'updateAdMuterState') {
+        isAdMuterEnabled = request.enabled;
+        if (isAdMuterEnabled) {
             initAdDetection();
         } else {
             stopAdDetection();
+            if (isAdPlaying) {
+                handleAdEnd();
+            }
         }
         sendResponse({ success: true });
     }
     return true;
 });
-
-initAdDetection();
 
 console.log('Paramount+ content script loaded');

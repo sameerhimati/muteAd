@@ -93,7 +93,7 @@ const PopupApp = () => {
       </div>
 
       <button
-        onClick={() => chrome.tabs.create({ url: 'https://github.com/sameerhimati/muteAd/issues' })}
+        onClick={() => chrome.tabs.create({ url: 'https://www.fend.ai/#:~:text=Clients-,Contact,-Plans%20%26%20Pricing' })}
         className="w-full py-3 px-4 bg-gradient-to-r from-accent-600 to-accent-500 text-gray-100 rounded-xl shadow-lg hover:from-accent-700 hover:to-accent-600 transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-2 focus:ring-offset-dark-900 text-sm font-medium"
       >
         Support this extension
