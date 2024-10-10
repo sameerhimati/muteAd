@@ -1,0 +1,42 @@
+{
+    "name": "mutead",
+    "version": "2.0.0",
+    "description": "Chrome extension to automatically mute ads on popular streaming services",
+    "main": "src/popup/index.js",
+    "scripts": {
+      "build": "webpack --mode production",
+      "watch": "webpack --mode development --watch"
+    },
+    "repository": {
+      "type": "git",
+      "url": "git+https://github.com/sameerhimati/muteAd.git"
+    },
+    "keywords": ["chrome-extension", "ad-muter"],
+    "author": "Sameer Himati",
+    "license": "ISC",
+    "bugs": {
+      "url": "https://github.com/sameerhimati/muteAd/issues"
+    },
+    "homepage": "https://github.com/sameerhimati/muteAd#readme",
+    "dependencies": {
+    "react": "^17.0.2",
+    "react-dom": "^17.0.2",
+    "lucide-react": "^0.263.1"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.15.0",
+    "@babel/preset-env": "^7.15.0",
+    "@babel/preset-react": "^7.14.5",
+    "autoprefixer": "^10.3.1",
+    "babel-loader": "^8.2.2",
+    "copy-webpack-plugin": "^9.0.1",
+    "css-loader": "^6.2.0",
+    "html-webpack-plugin": "^5.3.2",
+    "postcss": "^8.3.6",
+    "postcss-loader": "^6.1.1",
+    "style-loader": "^3.2.1",
+    "tailwindcss": "^2.2.7",
+    "webpack": "^5.50.0",
+    "webpack-cli": "^4.8.0"
+  }
+}

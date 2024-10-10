@@ -1,0 +1,55 @@
+{
+  "manifest_version": 3,
+  "name": "muteAd",
+  "version": "2.0",
+  "description": "Automatically mutes ads on popular streaming services",
+  "permissions": [
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "*://*.youtube.com/*",
+    "*://*.twitch.tv/*",
+    "*://*.hulu.com/*",
+    "*://*.peacocktv.com/*",
+    "*://*.paramountplus.com/*",
+    "*://*.hbomax.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.youtube.com/*"],
+      "js": ["content-scripts/youtube-content.js"]
+    },
+    {
+      "matches": ["*://*.twitch.tv/*"],
+      "js": ["content-scripts/twitch-content.js"]
+    },
+    {
+      "matches": ["*://*.hulu.com/*"],
+      "js": ["content-scripts/hulu-content.js"]
+    },
+    {
+      "matches": ["*://*.peacocktv.com/*"],
+      "js": ["content-scripts/peacock-content.js"]
+    },
+    {
+      "matches": ["*://*.paramountplus.com/*"],
+      "js": ["content-scripts/paramount-content.js"]
+    },
+    {
+      "matches": ["*://*.hbomax.com/*"],
+      "js": ["content-scripts/hbomax-content.js"]
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
